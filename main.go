@@ -1,40 +1,47 @@
 package main
 
 import (
-	"abhiroopsantra.dev/barky/handlers"
 	"fmt"
+	"log"
 	"net/http"
 )
 
+type apiConfig struct {
+	fileserverHits int
+}
+
 func main() {
-	const ServerPort = "8080"
-	mux := http.ServeMux{}
+	const filepathRoot = "."
+	const port = "8080"
 
-	directoriesToBeServed := map[string]string{
-		"/app":        "./pages",
-		"/app/assets": "./assets",
+	apiCfg := apiConfig{
+		fileserverHits: 0,
 	}
 
-	for path, directory := range directoriesToBeServed {
-		fileServer := http.FileServer(http.Dir(directory))
-		mux.Handle(path, http.StripPrefix(path, fileServer))
+	mux := http.NewServeMux()
+	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
+	mux.HandleFunc("GET /api/healthz", handlerReadiness)
+	mux.HandleFunc("GET /api/metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("/api/reset", apiCfg.handlerReset)
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: mux,
 	}
 
-	mux.HandleFunc("/healthz", handlers.Healthz)
+	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
+	log.Fatal(srv.ListenAndServe())
+}
 
-	//fileServer := http.FileServer(http.Dir("./pages"))
-	//mux.Handle("/", http.StripPrefix("/", fileServer))
+func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+}
 
-	server := &http.Server{
-		Addr:    ":" + ServerPort,
-		Handler: &mux,
-	}
-
-	fmt.Println("Server is running on port 8080")
-
-	err := server.ListenAndServe()
-
-	if err != nil {
-		fmt.Println(err.Error())
-	}
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits++
+		next.ServeHTTP(w, r)
+	})
 }
