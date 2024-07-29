@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 type apiConfig struct {
@@ -21,7 +22,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
-	mux.HandleFunc("GET /api/metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("/api/reset", apiCfg.handlerReset)
 
 	srv := &http.Server{
@@ -34,9 +35,18 @@ func main() {
 }
 
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	content, err := os.ReadFile("./metrics.html")
+	if err != nil {
+		http.Error(w, "Could not read metrics.html", http.StatusInternalServerError)
+		return
+	}
+	response := fmt.Sprintf(string(content), cfg.fileserverHits)
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+	_, err = w.Write([]byte(response))
+	if err != nil {
+		log.Printf("Could not write response: %v\n", err)
+	}
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
